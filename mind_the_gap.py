@@ -1,17 +1,18 @@
 #!/usr/bin/python2.7
 
 import os
-import sys, getopt
+import sys
+import getopt
 import psycopg2
 import urllib2
 import json
 import time
 from datetime import date, timedelta, datetime
 
-def execute_sql(sql,data=[]):
+def execute_sql(sql, data=[]):
   global cursor
   try:
-    return cursor.execute(sql,data)
+    return cursor.execute(sql, data)
   except psycopg2.Error as e:
     print "ERROR CODE: %s" % e.pgcode
     print e.pgerror
@@ -42,22 +43,28 @@ def is_date_range_valid(date1, date2):
     print "Error: start date (%s) is greater than end date (%s)" % (pretty_day(date1), pretty_day(date2))
     sys.exit(1)
 
-def pretty_day(day):
-  return day.strftime('%d-%m-%Y')
+def pretty_day(day): return day.strftime('%d-%m-%Y')
 
 def find_missing_days(days):
   date_set = set(days[0] + timedelta(x) for x in range((days[-1] - days[0]).days))
   return sorted(date_set - set(days))
 
 def find_missing_hours(hours):
-  original_hours = set([int(hour[0]) for hour in hours])
-  return sorted(list(set(range(0,24)) - original_hours))
+  hour_set = set([int(hour[0]) for hour in hours])
+  return sorted(list(set(range(0,24)) - hour_set))
 
 def update_content(day, hour, range, text):
   execute_sql("INSERT INTO content (date, hour, range, text) VALUES (%s, %s, %s, %s)", (day, hour , range , text))
   execute_sql("INSERT INTO status (date, hour) VALUES (%s, %s)", (day, hour))
 
-def missing_tables(days):
+def call_api(url):
+  try:
+    response = urllib2.urlopen(url)
+    return json.load(response)
+  except urllib2.HTTPError as e:
+    print "Request Error: %s" % e
+
+def find_missing_rows(days):
   global row_count
   missing = find_missing_days(days)
   if missing:
@@ -65,15 +72,12 @@ def missing_tables(days):
       if dry_run:
         verbose_print("%s is missing" % (pretty_day(day)))
       else:
-        try:
-          response = urllib2.urlopen(url24)
-          data = json.load(response)
+        data = call_api(url24)
+        if data:
           for hour in range(24):
             update_content(day, hour, data["range"], data["text"])
           verbose_print("%s was updated" % (pretty_day(day)))
-          row_count+=24
-        except:
-          print "Error: request error"
+          row_count += 24
 
   for day in days:
     execute_sql("SELECT hour from status WHERE date=%s ORDER BY date, hour", [day])
@@ -84,14 +88,11 @@ def missing_tables(days):
         if dry_run:
           verbose_print("%s:%s:00 is missing" % (pretty_day(day), hour))
         else:
-          try:
-            response = urllib2.urlopen(url1)
-            data = json.load(response)
+          data = call_api(url1)
+          if data:
             update_content(day, hour, data["range"], data["text"])
             verbose_print("%s:%s:00 was updated" % (pretty_day(day), hour))
-            row_count+=1
-          except:
-            print "Error: request error"
+            row_count += 1
 
 def main(argv):
   global dry_run
@@ -100,11 +101,11 @@ def main(argv):
   global url24
   global verbose
   dry_run = False
-  end_date=''
-  row_count=0
-  start_date=''
-  url1  ="http://mockbin.org/bin/1f070f39-3781-4213-8fe1-71e072fb9128"
-  url24 ="http://mockbin.org/bin/d21a0e91-05aa-491b-a4a0-d795aeadb24d"
+  end_date = ''
+  row_count = 0
+  start_date = ''
+  url1 = "http://mockbin.org/bin/1f070f39-3781-4213-8fe1-71e072fb9128"
+  url24 = "http://mockbin.org/bin/d21a0e91-05aa-491b-a4a0-d795aeadb24d"
   verbose = False
 
   db_host = os.getenv("DB_HOST", "psql_host")
@@ -133,13 +134,13 @@ def main(argv):
   verbose_print("MIND THE GAP")
   verbose_print("************************")
   if start_date and end_date:
-    is_date_range_valid(start_date,end_date)
+    is_date_range_valid(start_date, end_date)
 
   c=0
   p=False
   while p == False:
     try:
-      params="dbname='data' user=%s host=%s password=%s" % (db_user, db_host, db_password)
+      params = "dbname='data' user=%s host=%s password=%s" % (db_user, db_host, db_password)
       conn = psycopg2.connect(params)
       p=True
     except:
@@ -154,22 +155,22 @@ def main(argv):
   cursor = conn.cursor()
   sql = "SELECT DISTINCT date from status "
   if start_date:
-    sql+="WHERE date >= '%s'" % start_date
+    sql += "WHERE date >= '%s'" % start_date
   if end_date:
     if start_date:
-      sql+=" AND "
+      sql += " AND "
     else:
-      sql+=" WHERE "
+      sql += " WHERE "
     sql+="date <= '%s' " % end_date
 
-  sql+="ORDER BY date"
+  sql += "ORDER BY date"
   execute_sql(sql)
   rows = cursor.fetchall()
-  days=[]
+  days = []
   for row in rows:
     days.append(row[0])
 
-  missing_tables(days)
+  find_missing_rows(days)
   conn.commit()
   conn.close()
   if verbose:
