@@ -1,0 +1,20 @@
+version: "2"
+services:
+  api_service_tools:
+    build: .
+    container_name: api_service_tools
+    environment:
+      - DB_USER=sat
+      - DB_PASS=pass
+    links:
+      - psql:psql_host
+  psql:
+    image: postgres:9.5
+    container_name: psql
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_USER=sat
+    volumes:
+      - ./db-init:/docker-entrypoint-initdb.d
